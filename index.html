@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GeoCRIME — Predictive Crime Hotspot Mapping | Occidental Mindoro</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Local CSS -->
+  <link rel="stylesheet" href="css/style.css" />
+
+  <style>
+    /* ── Incident popup ─────────────────────────────────────── */
+    .geocrime-incident-popup .leaflet-popup-content-wrapper {
+      background: rgba(14, 18, 26, 0.98) !important;
+      border: 1px solid #3a7bd5 !important;
+      border-radius: 10px !important;
+      box-shadow: 0 8px 32px rgba(0,0,0,.8) !important;
+      padding: 0 !important;
+      overflow: hidden;
+    }
+    .geocrime-incident-popup .leaflet-popup-tip-container { display: none !important; }
+    .geocrime-incident-popup .leaflet-popup-content {
+      margin: 0 !important;
+      width: auto !important;
+    }
+    .geocrime-incident-popup .leaflet-popup-close-button {
+      color: #8b949e !important;
+      font-size: 18px !important;
+      top: 7px !important;
+      right: 9px !important;
+      z-index: 10;
+    }
+    .geocrime-incident-popup .leaflet-popup-close-button:hover {
+      color: #e74c3c !important;
+    }
+    /* Ensure popup pane sits above dot layer */
+    .leaflet-popup-pane { z-index: 700 !important; }
+
+    .inc-popup { font-family: 'Segoe UI', system-ui, sans-serif; min-width: 190px; }
+
+    .inc-popup-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 32px 10px 12px;
+      background: rgba(255,255,255,0.05);
+      border-bottom: 1px solid #2a3447;
+    }
+    .inc-popup-icon  { font-size: 16px; line-height: 1; }
+    .inc-popup-type  { font-size: 13px; font-weight: 700; color: #e6edf3; }
+
+    .inc-popup-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 5px 12px;
+      border-bottom: 1px solid #1c2230;
+    }
+    .inc-popup-row:last-child { border-bottom: none; padding-bottom: 10px; }
+    .inc-popup-key { font-size: 10px; color: #8b949e; }
+    .inc-popup-val { font-size: 11px; font-weight: 600; color: #e6edf3; text-align: right; max-width: 120px; }
+
+    /* ── Crime type legend strip (map overlay) ──────────────── */
+    .crime-type-legend {
+      position: absolute;
+      bottom: 36px;
+      left: 12px;
+      background: rgba(13,17,23,0.88);
+      backdrop-filter: blur(6px);
+      border: 1px solid #2a3447;
+      border-radius: 8px;
+      padding: 8px 12px;
+      z-index: 500;
+      pointer-events: none;
+    }
+    .crime-type-legend-title {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #4d5b6e;
+      margin-bottom: 6px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    .crime-type-legend-items {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px 12px;
+    }
+    .crime-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: #8b949e;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      white-space: nowrap;
+    }
+    .crime-legend-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      border: 1.5px dashed white;
+      flex-shrink: 0;
+    }
+
+    /* ── Hint strip shown when dots are visible ─────────────── */
+    .dot-hint {
+      position: absolute;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(13,17,23,0.85);
+      border: 1px solid #334155;
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 11px;
+      color: #8b949e;
+      pointer-events: none;
+      z-index: 500;
+      white-space: nowrap;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: none;
+    }
+    .dot-hint.visible { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       TOP NAV BAR
+  ═══════════════════════════════════════════════════════════ -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="18" cy="18" r="16" fill="#1a3a5c" stroke="#3a7bd5" stroke-width="2"/>
+          <path d="M18 8 L22 16 L30 17 L24 23 L26 31 L18 27 L10 31 L12 23 L6 17 L14 16 Z"
+                fill="#3a7bd5" opacity="0.9"/>
+          <circle cx="18" cy="18" r="3" fill="#e74c3c"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-title">GeoCRIME</span>
+        <span class="brand-subtitle">Geospatial Crime Risk Intelligence &amp; Mapping Environment</span>
+      </div>
+    </div>
+    <div class="topbar-meta">
+      <span class="meta-badge">Occidental Mindoro</span>
+      <span class="meta-badge secondary">MIMAROPA Region</span>
+      <span class="meta-badge accent">Prototype v1.0</span>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       MAIN LAYOUT
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="app-layout">
+
+    <!-- ── LEFT SIDEBAR ───────────────────────────────────────── -->
+    <aside class="sidebar">
+
+      <!-- FILTERS -->
+      <section class="sidebar-section">
+        <h3 class="section-title">
+          <span class="section-icon">⚙</span> Filters
+        </h3>
+
+        <div class="filter-group">
+          <label class="filter-label" for="filter-year">Year</label>
+          <select id="filter-year" class="filter-select">
+            <option value="all">All Years (2021–2023)</option>
+            <option value="2021">2021</option>
+            <option value="2022">2022</option>
+            <option value="2023">2023</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label" for="filter-crime-type">Crime Type</label>
+          <select id="filter-crime-type" class="filter-select">
+            <option value="total">Total Crime Volume</option>
+            <option value="index">Index Crimes</option>
+            <option value="nonIndex">Non-Index Crimes</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label" for="filter-metric">Map Metric</label>
+          <select id="filter-metric" class="filter-select">
+            <option value="count">Crime Count</option>
+            <option value="rate">Rate per 10,000 residents</option>
+          </select>
+        </div>
+
+        <button id="btn-reset" class="btn-secondary">↺ Reset Filters</button>
+      </section>
+
+      <!-- LEGEND -->
+      <section class="sidebar-section">
+        <h3 class="section-title">
+          <span class="section-icon">▦</span> Heat Legend
+        </h3>
+        <div class="legend-container">
+          <div class="legend-gradient"></div>
+          <div class="legend-labels">
+            <span id="legend-min" class="legend-min">Low</span>
+            <span id="legend-mid" class="legend-mid"></span>
+            <span id="legend-max" class="legend-max">High</span>
+          </div>
+        </div>
+        <p class="legend-note" id="legend-note">Total crime count · All years</p>
+      </section>
+
+      <!-- PROVINCIAL SUMMARY -->
+      <section class="sidebar-section">
+        <h3 class="section-title">
+          <span class="section-icon">📊</span> Provincial Summary
+        </h3>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="stat-total">2,774</div>
+            <div class="stat-label">Total Crimes<br>(2021–2023)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-index">485</div>
+            <div class="stat-label">Index Crimes<br>(2021–2023)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value highlight-red" id="stat-hotspot">San Jose</div>
+            <div class="stat-label">Top Crime<br>Municipality</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-cse">72.98%</div>
+            <div class="stat-label">CSE 2023<br>(Province)</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TOP MUNICIPALITIES RANKING -->
+      <section class="sidebar-section">
+        <h3 class="section-title">
+          <span class="section-icon">🏆</span> Municipality Ranking
+        </h3>
+        <ol class="ranking-list" id="ranking-list">
+          <!-- populated by JS -->
+        </ol>
+      </section>
+
+      <div class="sidebar-footer">
+        <p>Data: PSA (2024) · PNP CIRAS</p>
+        <p>Study: GeoCRIME Thesis — OMSU MIT 2026</p>
+      </div>
+
+    </aside>
+
+    <!-- ── CENTER: MAP + CHART ─────────────────────────────────── -->
+    <main class="main-content">
+
+      <!-- Map container -->
+      <div class="map-wrapper">
+        <div id="map"></div>
+
+        <!-- Floating info panel (shown on municipality click) -->
+        <div id="info-panel" class="info-panel hidden">
+          <button id="info-close" class="info-close" title="Close">✕</button>
+          <div class="info-header">
+            <div class="info-name" id="info-name">—</div>
+            <div class="info-risk-badge" id="info-risk-badge">—</div>
+          </div>
+          <div class="info-body">
+            <div class="info-row">
+              <span class="info-key">Population (2024)</span>
+              <span class="info-val" id="info-pop">—</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Police Personnel</span>
+              <span class="info-val" id="info-police">—</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Crime Rate /10,000</span>
+              <span class="info-val" id="info-rate">—</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Total Crimes (2021)</span>
+              <span class="info-val" id="info-c2021">—</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Total Crimes (2022)</span>
+              <span class="info-val" id="info-c2022">—</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Total Crimes (2023)</span>
+              <span class="info-val" id="info-c2023">—</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Index Crimes (2023)</span>
+              <span class="info-val" id="info-index2023">—</span>
+            </div>
+          </div>
+          <div class="info-focus-title">Focus Crimes Breakdown</div>
+          <div class="info-focus-grid" id="info-focus-grid">
+            <!-- populated by JS -->
+          </div>
+          <div class="info-desc" id="info-desc">—</div>
+        </div>
+
+        <!-- Map overlay title -->
+        <div class="map-title-overlay">
+          <span id="map-overlay-title">Crime Heatmap — All Years — Total Volume</span>
+        </div>
+
+        <!-- Crime type dot legend (bottom-left, visible when dots are shown) -->
+        <div class="crime-type-legend" id="crime-type-legend">
+          <div class="crime-type-legend-title">Incident Dot Legend</div>
+          <div class="crime-type-legend-items">
+            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#f39c12"></div>Theft</div>
+            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#e74c3c"></div>Rape</div>
+            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#e67e22"></div>Physical Injury</div>
+            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#c0392b"></div>Robbery</div>
+            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#8e1c1c"></div>Murder</div>
+            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#922b21"></div>Homicide</div>
+            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#2980b9"></div>Carnapping</div>
+            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#7f8c8d"></div>Non-Index</div>
+          </div>
+        </div>
+
+        <!-- Bottom hint when dots are active -->
+        <div class="dot-hint" id="dot-hint">Click a dot to see incident details · Click map to clear</div>
+
+        <!-- ═══ XAI PREDICTION PANEL (right drawer) ═══ -->
+        <div id="xai-panel" class="xai-panel hidden">
+          <div class="xai-panel-header">
+            <div class="xai-panel-title">
+              <span class="xai-icon">🧠</span>
+              <div>
+                <div class="xai-title-text">XAI Crime Prediction</div>
+                <div class="xai-subtitle" id="xai-municipality-name">Select a municipality</div>
+              </div>
+            </div>
+            <button id="xai-close" class="xai-close" title="Close">✕</button>
+          </div>
+
+          <!-- Barangay selector -->
+          <div class="xai-section">
+            <label class="xai-label" for="xai-barangay-select">Barangay</label>
+            <select id="xai-barangay-select" class="xai-select">
+              <option value="">— Select barangay —</option>
+            </select>
+          </div>
+
+          <!-- Risk gauge -->
+          <div class="xai-section xai-gauge-section" id="xai-gauge-section" style="display:none">
+            <div class="xai-gauge-wrap">
+              <svg class="xai-gauge-svg" viewBox="0 0 200 110" xmlns="http://www.w3.org/2000/svg">
+                <!-- Track arc -->
+                <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#2a3447" stroke-width="14" stroke-linecap="round"/>
+                <!-- Value arc -->
+                <path id="xai-gauge-arc" d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#e74c3c" stroke-width="14" stroke-linecap="round"
+                      stroke-dasharray="251.2" stroke-dashoffset="251.2"/>
+                <!-- Zone labels -->
+                <text x="18"  y="118" fill="#1a9850" font-size="8" font-family="Segoe UI,sans-serif">Low</text>
+                <text x="82"  y="118" fill="#f39c12" font-size="8" font-family="Segoe UI,sans-serif">Moderate</text>
+                <text x="162" y="118" fill="#e74c3c" font-size="8" font-family="Segoe UI,sans-serif">High</text>
+                <!-- Score text -->
+                <text id="xai-gauge-score" x="100" y="82" text-anchor="middle" fill="#e6edf3"
+                      font-size="28" font-weight="700" font-family="Segoe UI,sans-serif">—</text>
+                <text x="100" y="96" text-anchor="middle" fill="#8b949e"
+                      font-size="9" font-family="Segoe UI,sans-serif">RISK SCORE</text>
+              </svg>
+              <div class="xai-risk-badge-wrap">
+                <span id="xai-risk-badge" class="xai-risk-badge">—</span>
+                <span id="xai-trend-badge" class="xai-trend-badge">—</span>
+              </div>
+            </div>
+            <div class="xai-forecast-row">
+              <span class="xai-forecast-label">Forecast period:</span>
+              <span id="xai-forecast-period" class="xai-forecast-val">—</span>
+            </div>
+          </div>
+
+          <!-- AI Explanation narrative -->
+          <div class="xai-section" id="xai-explanation-section" style="display:none">
+            <div class="xai-section-title">🤖 AI Explanation</div>
+            <div class="xai-explanation-headline" id="xai-explanation-headline"></div>
+            <div class="xai-explanation-summary"  id="xai-explanation-summary"></div>
+            <div class="xai-reason-cards"         id="xai-reason-cards"></div>
+            <div class="xai-explanation-conclusion" id="xai-explanation-conclusion"></div>
+          </div>
+
+          <!-- Top factors -->
+          <div class="xai-section" id="xai-factors-section" style="display:none">
+            <div class="xai-section-title">🔍 Key Risk Drivers</div>
+            <ul class="xai-factors-list" id="xai-factors-list"></ul>
+          </div>
+
+          <!-- SHAP bar chart -->
+          <div class="xai-section" id="xai-shap-section" style="display:none">
+            <div class="xai-section-title">📊 SHAP Feature Contributions</div>
+            <div class="xai-shap-hint">Red = raises risk · Green = lowers risk</div>
+            <div class="xai-shap-chart" id="xai-shap-bars"></div>
+          </div>
+
+          <!-- Feature details table -->
+          <div class="xai-section" id="xai-features-section" style="display:none">
+            <div class="xai-section-title">📋 Feature Values</div>
+            <table class="xai-feat-table" id="xai-feat-table">
+              <thead>
+                <tr>
+                  <th>Feature</th>
+                  <th>Value</th>
+                  <th>Norm.</th>
+                  <th>SHAP</th>
+                </tr>
+              </thead>
+              <tbody id="xai-feat-tbody"></tbody>
+            </table>
+          </div>
+
+          <!-- Municipality hotspot ranking -->
+          <div class="xai-section" id="xai-ranking-section" style="display:none">
+            <div class="xai-section-title">🏘 Barangay Risk Ranking</div>
+            <div class="xai-brgy-list" id="xai-brgy-list"></div>
+          </div>
+
+          <div class="xai-disclaimer">
+            ⚠ Predictions are based on synthetic historical data for prototype purposes.
+            Real deployment requires verified PNP CIRAS incident records.
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart panel below the map -->
+      <div class="chart-panel">
+        <div class="chart-tabs">
+          <button class="chart-tab active" data-chart="bar">📊 Municipality Comparison</button>
+          <button class="chart-tab" data-chart="trend">📈 Provincial Trend</button>
+          <button class="chart-tab" data-chart="focus">🔍 Focus Crimes (H1 2024)</button>
+        </div>
+
+        <div class="chart-view active" id="chart-view-bar">
+          <canvas id="chart-bar"></canvas>
+        </div>
+        <div class="chart-view" id="chart-view-trend">
+          <canvas id="chart-trend"></canvas>
+        </div>
+        <div class="chart-view" id="chart-view-focus">
+          <canvas id="chart-focus"></canvas>
+        </div>
+      </div>
+
+    </main>
+
+  </div><!-- /.app-layout -->
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SCRIPTS — order matters: data → map → charts → app
+  ═══════════════════════════════════════════════════════════ -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/incidents.js"></script>
+  <script src="js/xai.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>
