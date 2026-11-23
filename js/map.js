@@ -1,22 +1,24 @@
 /**
- * GeoCRIME — Map Module v2 (js/map.js)
+ * GeoCRIME — Map Module v3 (js/map.js)
+ *
+ * Data-driven: heatmap and anchors only appear after data is uploaded.
+ * Shows an empty-state overlay when ALL_INCIDENTS is empty.
  *
  * Layers (bottom → top):
  *  1. Google Maps tile base
- *  2. Leaflet.heat heatmap (all filtered incidents)
- *  3. Municipality anchor markers (clickable pins)
- *  4. Incident dot layer (shown when a municipality is clicked)
+ *  2. Leaflet.heat heatmap (uploaded incidents only)
+ *  3. Municipality anchor markers (only for municipalities with data)
+ *  4. Barangay dot layer (single barangay, shown after picker selection)
  */
 
 const MapModule = (() => {
 
   // ── STATE ──────────────────────────────────────────────────────
-  let _map            = null;
-  let _heatLayer      = null;
-  let _anchorLayer    = null;
-  let _dotLayer       = null;
-  let _activeMuniId   = null;
-  let _suppressMapClick = false;   // flag to block map click after marker click
+  let _map              = null;
+  let _heatLayer        = null;
+  let _anchorLayer      = null;
+  let _dotLayer         = null;
+  let _suppressMapClick = false;
 
   let _currentYear      = 'all';
   let _currentCrimeType = 'total';
@@ -24,88 +26,93 @@ const MapModule = (() => {
 
   let _onMunicipalityClick = null;
 
-  // ── CRIME TYPE COLOURS (dot layer) ────────────────────────────
-  const TYPE_COLOUR = {
-    theft:          '#f39c12',
-    rape:           '#e74c3c',
-    physicalInjury: '#e67e22',
-    robbery:        '#c0392b',
-    murder:         '#8e1c1c',
-    homicide:       '#922b21',
-    carnapping:     '#2980b9',
-    nonIndex:       '#7f8c8d',
-  };
-
   // ── HEAT OPTIONS ──────────────────────────────────────────────
   const HEAT_OPTIONS = {
-    minOpacity:  0.35,
-    maxZoom:     16,
-    max:         1.0,
-    radius:      28,
-    blur:        22,
+    minOpacity: 0.4,
+    maxZoom:    17,
+    max:        1.0,
+    radius:     30,
+    blur:       24,
     gradient: {
-      0.00: '#0000ff',   // blue  — very low
-      0.20: '#00bfff',   // cyan
-      0.40: '#00ff00',   // green
-      0.60: '#ffff00',   // yellow
-      0.80: '#ff7700',   // orange
-      1.00: '#ff0000',   // red   — very high
+      0.00: '#0000ff',
+      0.20: '#00bfff',
+      0.40: '#00ff00',
+      0.60: '#ffff00',
+      0.80: '#ff7700',
+      1.00: '#ff0000',
     },
   };
 
-  // ── BUILD / REFRESH HEAT LAYER ─────────────────────────────────
-  function _refreshHeat() {
-    const pts = getHeatPoints(_currentYear, _currentCrimeType);
-
-    if (_heatLayer) {
-      _map.removeLayer(_heatLayer);
-      _heatLayer = null;
-    }
-
-    if (pts.length === 0) return;
-
-    _heatLayer = L.heatLayer(pts, HEAT_OPTIONS).addTo(_map);
+  // ── EMPTY STATE ───────────────────────────────────────────────
+  function _showEmptyState(visible) {
+    const el = document.getElementById('map-empty-state');
+    if (el) el.style.display = visible ? 'flex' : 'none';
   }
 
-  // ── MUNICIPALITY ANCHOR MARKERS ───────────────────────────────
-  // One pink/white dot per municipality — matches the reference screenshot style.
+  // ── COLOUR LOOKUP ─────────────────────────────────────────────
+  // Reads from dynamic CRIME_TYPE_META populated by upload.js
+  function _dotColour(crimeType) {
+    const meta = CRIME_TYPE_META[crimeType];
+    return (meta && meta.color) ? meta.color : '#8b949e';
+  }
+
+  // ── HEAT LAYER ────────────────────────────────────────────────
+  function _refreshHeat() {
+    if (_heatLayer) { _map.removeLayer(_heatLayer); _heatLayer = null; }
+
+    if (!ALL_INCIDENTS.length) { _showEmptyState(true); return; }
+
+    _showEmptyState(false);
+    const pts = getHeatPoints(_currentYear, _currentCrimeType);
+    if (pts.length) _heatLayer = L.heatLayer(pts, HEAT_OPTIONS).addTo(_map);
+  }
+
+  // ── ANCHOR MARKERS ────────────────────────────────────────────
+  // One pin per municipality that has at least one uploaded incident.
   function _buildAnchors() {
-    if (_anchorLayer) {
-      _map.removeLayer(_anchorLayer);
-      _anchorLayer = null;
-    }
+    if (_anchorLayer) { _map.removeLayer(_anchorLayer); _anchorLayer = null; }
+    if (!ALL_INCIDENTS.length) return;
 
     _anchorLayer = L.layerGroup();
 
     CRIME_DATA.municipalities.forEach(muni => {
-      const c = MUNICIPALITY_CENTROIDS[muni.id];
+      const c     = MUNICIPALITY_CENTROIDS[muni.id];
       if (!c) return;
 
-      // Outer ring + inner dot  (SVG circle icon)
+      const count = getMunicipalityIncidents(muni.id, _currentYear, _currentCrimeType).length;
+      if (count === 0) return;   // skip municipalities with no matching data
+
+      // Scale pin size by relative incident count
+      const allCounts = CRIME_DATA.municipalities
+        .map(m => getMunicipalityIncidents(m.id, _currentYear, _currentCrimeType).length);
+      const maxCount  = Math.max(...allCounts, 1);
+      const pct       = count / maxCount;
+      const r         = Math.round(6 + pct * 10);   // 6–16px radius
+
       const svg = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
-          <circle cx="11" cy="11" r="9"  fill="#e91e8c" fill-opacity="0.25" stroke="#e91e8c" stroke-width="1.5"/>
-          <circle cx="11" cy="11" r="4"  fill="white"/>
-          <circle cx="11" cy="11" r="2"  fill="#e91e8c"/>
+        <svg xmlns="http://www.w3.org/2000/svg" width="${r*2+6}" height="${r*2+6}" viewBox="0 0 ${r*2+6} ${r*2+6}">
+          <circle cx="${r+3}" cy="${r+3}" r="${r+1}"
+            fill="#e91e8c" fill-opacity="0.18" stroke="#e91e8c" stroke-width="1.5"/>
+          <circle cx="${r+3}" cy="${r+3}" r="${Math.round(r*0.5)}"
+            fill="white"/>
+          <circle cx="${r+3}" cy="${r+3}" r="${Math.round(r*0.28)}"
+            fill="#e91e8c"/>
         </svg>`;
 
       const icon = L.divIcon({
-        html:        svg,
-        className:   '',
-        iconSize:    [22, 22],
-        iconAnchor:  [11, 11],
+        html:       svg,
+        className:  '',
+        iconSize:   [r*2+6, r*2+6],
+        iconAnchor: [r+3, r+3],
       });
 
-      const count = getMunicipalityIncidents(muni.id, _currentYear, _currentCrimeType).length;
-
       const marker = L.marker([c.lat, c.lng], { icon, title: muni.name })
-        .bindTooltip(`<strong>${muni.name}</strong><br>${count} incidents`, {
-          className:  'geocrime-tooltip',
-          direction:  'top',
-          offset:     [0, -12],
-        });
+        .bindTooltip(
+          `<strong>${muni.name}</strong><br>${count.toLocaleString()} incident${count !== 1 ? 's' : ''}`,
+          { className:'geocrime-tooltip', direction:'top', offset:[0,-14] }
+        );
 
-      marker.on('click', (e) => {
+      marker.on('click', e => {
         L.DomEvent.stopPropagation(e);
         _suppressMapClick = true;
         _onAnchorClick(muni);
@@ -117,40 +124,47 @@ const MapModule = (() => {
     _anchorLayer.addTo(_map);
   }
 
-  // ── ANCHOR CLICK → SHOW INCIDENT DOTS ─────────────────────────
   function _onAnchorClick(muni) {
-    _activeMuniId = muni.id;
+    if (_onMunicipalityClick) _onMunicipalityClick(muni, _getRiskTier(muni.id));
+  }
 
-    // Clear previous dot layer
+  // ── BARANGAY DOT LAYER ────────────────────────────────────────
+  function showBarangayDots(municipalityId, barangayName) {
+    _activeMuniId = municipalityId;
     _clearDots();
 
-    const incidents = getMunicipalityIncidents(muni.id, _currentYear, _currentCrimeType);
+    const incidents = ALL_INCIDENTS.filter(i => {
+      if (i.municipalityId !== municipalityId || i.barangay !== barangayName) return false;
+      if (_currentYear !== 'all' && i.year !== _currentYear) return false;
+      if (_currentCrimeType !== 'total' && i.crimeType !== _currentCrimeType) return false;
+      return true;
+    });
+
+    if (!incidents.length) return 0;
 
     _dotLayer = L.layerGroup();
 
     incidents.forEach(inc => {
-      const colour = TYPE_COLOUR[inc.crimeType] || '#aaa';
-      const meta   = CRIME_TYPE_META[inc.crimeType] || { icon: '•', label: inc.crimeType };
+      const colour = _dotColour(inc.crimeType);
+      const meta   = CRIME_TYPE_META[inc.crimeType] || { icon: '📌', label: inc.crimeLabel || inc.crimeType };
 
-      // Use CircleMarker with autoClose:false so popup stays open
       const marker = L.circleMarker([inc.lat, inc.lng], {
-        radius:      7,
+        radius:      8,
         fillColor:   colour,
-        fillOpacity: 0.90,
-        color:       'white',
+        fillOpacity: 0.92,
+        color:       '#ffffff',
         weight:      2,
-        dashArray:   '4 2',
-      }).bindPopup(_buildIncidentPopup(inc), {
+      }).bindPopup(_buildPopup(inc, colour, meta), {
         className:    'geocrime-incident-popup',
-        maxWidth:     240,
+        maxWidth:     260,
         closeButton:  true,
-        autoClose:    false,   // keep popup open when map is clicked
-        closeOnClick: false,   // do not close on map click
+        autoClose:    false,
+        closeOnClick: false,
       });
 
-      marker.on('click', (e) => {
+      marker.on('click', e => {
         L.DomEvent.stopPropagation(e);
-        _suppressMapClick = true;   // block map click handler
+        _suppressMapClick = true;
         marker.openPopup();
       });
 
@@ -159,31 +173,29 @@ const MapModule = (() => {
 
     _dotLayer.addTo(_map);
 
-    // Pan to municipality centre
-    const c = MUNICIPALITY_CENTROIDS[muni.id];
+    const c = MUNICIPALITY_CENTROIDS[municipalityId];
     if (c) _map.panTo([c.lat, c.lng], { animate: true });
 
-    // Fire external callback (info panel in app.js)
-    if (_onMunicipalityClick) {
-      _onMunicipalityClick(muni, _getRiskTier(muni.id));
-    }
+    return incidents.length;
   }
 
-  // ── INCIDENT POPUP HTML ───────────────────────────────────────
-  function _buildIncidentPopup(inc) {
-    const meta   = CRIME_TYPE_META[inc.crimeType] || { icon: '•', label: inc.crimeType };
-    const colour = TYPE_COLOUR[inc.crimeType] || '#aaa';
-
-    // Format date nicely
+  function _buildPopup(inc, colour, meta) {
     const [y, m, d] = inc.date.split('-');
     const months    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const dateStr   = `${months[parseInt(m,10)-1]} ${parseInt(d,10)}, ${y}`;
+    const rawLine   = (inc.crimeRaw && inc.crimeRaw !== inc.crimeLabel)
+      ? `<div class="inc-popup-row">
+           <span class="inc-popup-key">Full Description</span>
+           <span class="inc-popup-val" style="color:#8b949e;font-size:10px">${inc.crimeRaw}</span>
+         </div>` : '';
 
     return `
       <div class="inc-popup">
         <div class="inc-popup-header" style="border-left:4px solid ${colour}">
-          <span class="inc-popup-icon">${meta.icon}</span>
-          <span class="inc-popup-type">${meta.label}</span>
+          <span class="inc-popup-icon">${meta.icon || '📌'}</span>
+          <span class="inc-popup-type">${meta.label || inc.crimeType}</span>
+          <span style="font-size:9px;background:#1a3a5c;color:#58a6ff;padding:2px 7px;
+                border-radius:10px;margin-left:6px;border:1px solid #3a7bd5">Uploaded</span>
         </div>
         <div class="inc-popup-row">
           <span class="inc-popup-key">Barangay</span>
@@ -197,58 +209,46 @@ const MapModule = (() => {
           <span class="inc-popup-key">Date</span>
           <span class="inc-popup-val">${dateStr}</span>
         </div>
-        <div class="inc-popup-row">
-          <span class="inc-popup-key">Year</span>
-          <span class="inc-popup-val">${inc.year}</span>
-        </div>
+        ${rawLine}
       </div>`;
   }
 
   // ── CLEAR DOTS ────────────────────────────────────────────────
   function _clearDots() {
-    if (_dotLayer) {
-      _map.removeLayer(_dotLayer);
-      _dotLayer     = null;
-      _activeMuniId = null;
-    }
+    if (_dotLayer) { _map.removeLayer(_dotLayer); _dotLayer = null; }
   }
 
-  // ── RISK TIER (for info panel badge) ─────────────────────────
+  // ── RISK TIER ─────────────────────────────────────────────────
   function _getRiskTier(municipalityId) {
-    const counts = CRIME_DATA.municipalities.map(m =>
-      getMunicipalityIncidents(m.id, _currentYear, _currentCrimeType).length
-    ).sort((a, b) => a - b);
-
+    const counts = CRIME_DATA.municipalities
+      .map(m => getMunicipalityIncidents(m.id, _currentYear, _currentCrimeType).length)
+      .sort((a, b) => a - b);
     const val = getMunicipalityIncidents(municipalityId, _currentYear, _currentCrimeType).length;
-    const idx = counts.indexOf(val);
-    const pct = idx / (counts.length - 1);
+    const pct = counts.length > 1 ? counts.indexOf(val) / (counts.length - 1) : 0;
     if (pct >= 0.67) return 'high';
     if (pct >= 0.34) return 'medium';
     return 'low';
   }
+  function getRiskTier(id) { return _getRiskTier(id); }
 
-  // keep public for app.js
-  function getRiskTier(municipalityId) {
-    return _getRiskTier(municipalityId);
-  }
-
-  // ── LEGEND TICKS ─────────────────────────────────────────────
+  // ── LEGEND ────────────────────────────────────────────────────
   function _updateLegend() {
-    const counts  = CRIME_DATA.municipalities.map(m =>
-      getMunicipalityIncidents(m.id, _currentYear, _currentCrimeType).length
-    );
-    const minV = Math.min(...counts);
-    const maxV = Math.max(...counts);
-    const midV = Math.round((minV + maxV) / 2);
+    const total = ALL_INCIDENTS.length;
+    const counts = CRIME_DATA.municipalities
+      .map(m => getMunicipalityIncidents(m.id, _currentYear, _currentCrimeType).length);
+    const minV = counts.length ? Math.min(...counts) : 0;
+    const maxV = counts.length ? Math.max(...counts) : 0;
 
     document.getElementById('legend-min').textContent = minV.toLocaleString();
     document.getElementById('legend-max').textContent = maxV.toLocaleString();
-    document.getElementById('legend-mid').textContent = midV.toLocaleString();
+    document.getElementById('legend-mid').textContent = Math.round((minV + maxV) / 2).toLocaleString();
 
     const yearLabel = _currentYear === 'all' ? 'All years' : String(_currentYear);
-    const typeLabel = { total:'Total volume', index:'Index crimes', nonIndex:'Non-index crimes' }[_currentCrimeType];
+    const typeLabel = _currentCrimeType === 'total' ? 'All types'
+      : (CRIME_TYPE_META[_currentCrimeType]?.label || _currentCrimeType);
     document.getElementById('legend-note').textContent =
-      `${typeLabel} · ${yearLabel} · incident density`;
+      total ? `${typeLabel} · ${yearLabel} · ${total.toLocaleString()} total incidents`
+            : 'No data — upload a CSV to begin';
   }
 
   // ── PUBLIC API ────────────────────────────────────────────────
@@ -257,46 +257,31 @@ const MapModule = (() => {
     _onMunicipalityClick = onClickCb;
 
     _map = L.map(containerId, {
-      center:           [12.9, 120.7],
-      zoom:             8,
-      zoomControl:      true,
-      attributionControl: true,
+      center: [12.9, 120.7], zoom: 8,
+      zoomControl: true, attributionControl: true,
     });
 
-    // Google Maps roadmap tiles
     L.tileLayer(
       'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&key=AIzaSyBKCGXg4JwHkRITTlUAb9dHlsyF7jOJCc8',
-      {
-        attribution: '&copy; <a href="https://maps.google.com">Google Maps</a>',
-        subdomains:  ['0','1','2','3'],
-        maxZoom:     20,
-        tileSize:    256,
-      }
+      { attribution:'&copy; <a href="https://maps.google.com">Google Maps</a>',
+        subdomains:['0','1','2','3'], maxZoom:20, tileSize:256 }
     ).addTo(_map);
 
-    // Click anywhere on bare map → clear dots
-    // Uses flag to ignore clicks that originated from a marker
     _map.on('click', () => {
-      if (_suppressMapClick) {
-        _suppressMapClick = false;   // consume the flag, don't clear
-        return;
-      }
+      if (_suppressMapClick) { _suppressMapClick = false; return; }
       _clearDots();
     });
 
     _refreshHeat();
     _buildAnchors();
     _updateLegend();
-
-    // Fit to Occidental Mindoro extent
-    _map.fitBounds([[12.1, 119.6],[14.1, 121.3]], { padding: [20, 20] });
+    _map.fitBounds([[12.1,119.6],[14.1,121.3]], { padding:[20,20] });
   }
 
   function update(year, crimeType, metric) {
     _currentYear      = year === 'all' ? 'all' : parseInt(year, 10);
     _currentCrimeType = crimeType;
     _currentMetric    = metric;
-
     _clearDots();
     _refreshHeat();
     _buildAnchors();
@@ -308,6 +293,7 @@ const MapModule = (() => {
     if (muni) _onAnchorClick(muni);
   }
 
-  return { init, update, highlightById, getRiskTier };
+  return { init, update, highlightById, getRiskTier,
+           showBarangayDots, clearDots: _clearDots };
 
 })();

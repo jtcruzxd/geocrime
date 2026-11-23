@@ -1,16 +1,19 @@
 /**
- * GeoCRIME — Incident Data Module (js/incidents.js)
+ * GeoCRIME — Incident Store (js/incidents.js)
  *
- * Generates synthetic incident-level records that are:
- *  - Proportional to the real PSA/PNP crime totals per municipality per year
- *  - Spatially scattered around each municipality's real centroid
- *  - Typed with realistic focus-crime distributions from the thesis
- *  - Dated within the correct calendar year with seasonal variation
+ * This file no longer generates synthetic data.
+ * ALL_INCIDENTS starts empty and is populated exclusively by
+ * UploadModule.importPending() when the user uploads a CSV or JSON file.
  *
- * Each incident: { id, municipalityId, barangay, lat, lng, crimeType, date, year, month }
+ * All helper functions remain API-compatible with the rest of the codebase.
  */
 
-// ── MUNICIPALITY CENTROIDS (real geographic centres) ───────────────
+// ── LIVE INCIDENT STORE ──────────────────────────────────────────
+// Mutable array — UploadModule pushes records here on import.
+const ALL_INCIDENTS = [];
+
+// ── MUNICIPALITY CENTROIDS ───────────────────────────────────────
+// Used by map.js to place anchor markers and pan the map.
 const MUNICIPALITY_CENTROIDS = {
   'lubang':       { lat: 13.855, lng: 119.830, spread: 0.040 },
   'looc':         { lat: 13.820, lng: 120.070, spread: 0.025 },
@@ -25,7 +28,8 @@ const MUNICIPALITY_CENTROIDS = {
   'santa-cruz':   { lat: 12.530, lng: 120.980, spread: 0.060 },
 };
 
-// ── BARANGAY NAMES PER MUNICIPALITY (representative sample) ────────
+// ── BARANGAY NAMES ───────────────────────────────────────────────
+// Seed list per municipality; upload can add new barangay names.
 const BARANGAY_NAMES = {
   'lubang':       ['Poblacion I','Poblacion II','Tilik','Cabra','Ambil','Tagbac'],
   'looc':         ['Poblacion','Agkawayan','Ambil Island','Golo'],
@@ -40,174 +44,105 @@ const BARANGAY_NAMES = {
   'santa-cruz':   ['Poblacion','Buhay na Tubig','Burgos','Cataning','Concepcion','Laste','Paetan'],
 };
 
-// ── FOCUS CRIME WEIGHTS PER MUNICIPALITY ───────────────────────────
-// Based on thesis Table 2 focus crimes breakdown; weights sum to 1.
-const CRIME_WEIGHTS = {
-  'lubang':       { theft:0.22, rape:0.22, physicalInjury:0.11, robbery:0.11, murder:0.11, homicide:0.11, carnapping:0.11 },
-  'looc':         { theft:0.40, rape:0.20, physicalInjury:0.15, robbery:0.10, murder:0.05, homicide:0.05, carnapping:0.05 },
-  'paluan':       { theft:0.30, rape:0.25, physicalInjury:0.18, robbery:0.10, murder:0.07, homicide:0.05, carnapping:0.05 },
-  'abra-de-ilog': { theft:0.29, rape:0.22, physicalInjury:0.15, robbery:0.07, murder:0.07, homicide:0.07, carnapping:0.14 },
-  'mamburao':     { theft:0.30, rape:0.20, physicalInjury:0.15, robbery:0.10, murder:0.05, homicide:0.05, carnapping:0.10, nonIndex:0.05 },
-  'calintaan':    { theft:0.28, rape:0.18, physicalInjury:0.18, robbery:0.09, murder:0.09, homicide:0.09, carnapping:0.09 },
-  'rizal':        { theft:0.28, rape:0.22, physicalInjury:0.17, robbery:0.06, murder:0.06, homicide:0.06, carnapping:0.06, nonIndex:0.09 },
-  'magsaysay':    { theft:0.29, rape:0.22, physicalInjury:0.15, robbery:0.07, murder:0.07, homicide:0.07, carnapping:0.07, nonIndex:0.06 },
-  'sablayan':     { theft:0.26, rape:0.19, physicalInjury:0.15, robbery:0.07, murder:0.04, homicide:0.04, carnapping:0.07, nonIndex:0.18 },
-  'san-jose':     { theft:0.26, rape:0.23, physicalInjury:0.11, robbery:0.08, murder:0.08, homicide:0.06, carnapping:0.11, nonIndex:0.07 },
-  'santa-cruz':   { theft:0.29, rape:0.22, physicalInjury:0.15, robbery:0.07, murder:0.07, homicide:0.07, carnapping:0.07, nonIndex:0.06 },
-};
-
-// ── CRIME TYPE DISPLAY META ─────────────────────────────────────────
-const CRIME_TYPE_META = {
-  theft:          { label: 'Theft',           color: '#f39c12', icon: '💰' },
-  rape:           { label: 'Rape',            color: '#e74c3c', icon: '⚠' },
-  physicalInjury: { label: 'Physical Injury', color: '#e67e22', icon: '🤕' },
-  robbery:        { label: 'Robbery',         color: '#c0392b', icon: '🔫' },
-  murder:         { label: 'Murder',          color: '#8e1c1c', icon: '💀' },
-  homicide:       { label: 'Homicide',        color: '#922b21', icon: '⚔' },
-  carnapping:     { label: 'Carnapping',      color: '#1a5276', icon: '🚗' },
-  nonIndex:       { label: 'Non-Index Crime', color: '#5d6d7e', icon: '📋' },
-};
-
-// ── SEEDED PRNG (reproducible data on every load) ──────────────────
-function _seededRng(seed) {
-  let s = seed;
-  return function () {
-    s = (s * 1664525 + 1013904223) & 0xffffffff;
-    return (s >>> 0) / 0xffffffff;
-  };
-}
-
-// ── HELPERS ────────────────────────────────────────────────────────
-function _weightedChoice(weights, rng) {
-  const keys = Object.keys(weights);
-  let r = rng();
-  for (const k of keys) {
-    r -= weights[k];
-    if (r <= 0) return k;
-  }
-  return keys[keys.length - 1];
-}
-
-function _gaussianJitter(centre, spread, rng) {
-  // Box–Muller to get a roughly Gaussian scatter
-  const u1 = rng(), u2 = rng();
-  const z  = Math.sqrt(-2 * Math.log(u1 + 1e-10)) * Math.cos(2 * Math.PI * u2);
-  return centre + z * spread * 0.5;
-}
-
-function _randomDate(year, rng) {
-  // Slight seasonal bias: more crime in Q2/Q3 (months 4–9)
-  const monthWeights = [0.07,0.07,0.08,0.09,0.10,0.10,0.10,0.09,0.09,0.08,0.07,0.06];
-  let r = rng();
-  let month = 0;
-  for (let i = 0; i < 12; i++) {
-    r -= monthWeights[i];
-    if (r <= 0) { month = i; break; }
-  }
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const day = Math.floor(rng() * daysInMonth) + 1;
-  const mm  = String(month + 1).padStart(2, '0');
-  const dd  = String(day).padStart(2, '0');
-  return { date: `${year}-${mm}-${dd}`, month: month + 1, year };
-}
-
-// ── MAIN GENERATOR ─────────────────────────────────────────────────
-function _generateIncidents() {
-  const incidents = [];
-  let id = 1;
-
-  CRIME_DATA.municipalities.forEach((muni, muniIdx) => {
-    const centroid = MUNICIPALITY_CENTROIDS[muni.id];
-    if (!centroid) return;
-    const barangays = BARANGAY_NAMES[muni.id] || ['Poblacion'];
-    const weights   = CRIME_WEIGHTS[muni.id]  || {};
-
-    [2021, 2022, 2023].forEach((year, yearIdx) => {
-      const total = muni.crimes[year] || 0;
-      // Use a unique seed per municipality+year for reproducibility
-      const rng   = _seededRng((muniIdx + 1) * 1000 + yearIdx * 100 + 7919);
-
-      for (let i = 0; i < total; i++) {
-        const crimeType = _weightedChoice(weights, rng);
-        const barangay  = barangays[Math.floor(rng() * barangays.length)];
-
-        // Scatter incidents around the centroid with Gaussian jitter
-        // Higher-crime types cluster more tightly near the poblacion
-        const clusterFactor = (crimeType === 'theft' || crimeType === 'robbery') ? 0.6 : 1.0;
-        const lat = _gaussianJitter(centroid.lat, centroid.spread * clusterFactor, rng);
-        const lng = _gaussianJitter(centroid.lng, centroid.spread * clusterFactor, rng);
-
-        const { date, month } = _randomDate(year, rng);
-
-        incidents.push({
-          id:             id++,
-          municipalityId: muni.id,
-          municipality:   muni.name,
-          barangay,
-          lat:            parseFloat(lat.toFixed(6)),
-          lng:            parseFloat(lng.toFixed(6)),
-          crimeType,
-          date,
-          year,
-          month,
-        });
-      }
-    });
-  });
-
-  return incidents;
-}
-
-// ── EXPORTS ────────────────────────────────────────────────────────
-
-/** All 2,774 synthetic incidents (matches PSA totals exactly). */
-const ALL_INCIDENTS = _generateIncidents();
+// ── CRIME TYPE META ──────────────────────────────────────────────
+// Populated dynamically from uploaded data; seed with common PNP types.
+// Keys are the normalised/shortened crime label from upload.js.
+const CRIME_TYPE_META = {};
 
 /**
- * Returns incidents filtered by year and/or crimeType.
+ * Register or update a crime type entry.
+ * Called by upload.js for every unique crime type found in an upload.
+ */
+function registerCrimeType(key, label, colour) {
+  if (!CRIME_TYPE_META[key]) {
+    CRIME_TYPE_META[key] = {
+      label,
+      color:  colour || _assignColour(Object.keys(CRIME_TYPE_META).length),
+      icon:   _assignIcon(key),
+    };
+  }
+}
+
+// Auto-assign colours from a palette so each crime type gets a distinct colour
+const _COLOUR_PALETTE = [
+  '#e74c3c','#f39c12','#e67e22','#2980b9','#8e44ad',
+  '#27ae60','#c0392b','#16a085','#d35400','#2c3e50',
+  '#1abc9c','#e91e8c','#f1c40f','#3498db','#95a5a6',
+];
+function _assignColour(idx) {
+  return _COLOUR_PALETTE[idx % _COLOUR_PALETTE.length];
+}
+
+function _assignIcon(key) {
+  const lower = key.toLowerCase();
+  if (lower.includes('theft') || lower.includes('robbery'))  return '💰';
+  if (lower.includes('rape')  || lower.includes('sexual'))   return '⚠';
+  if (lower.includes('murder') || lower.includes('homicide'))return '💀';
+  if (lower.includes('physical') || lower.includes('injury'))return '🤕';
+  if (lower.includes('carn') || lower.includes('vehicle'))   return '🚗';
+  if (lower.includes('drug') || lower.includes('dangerous')) return '💊';
+  if (lower.includes('ra ') || lower.includes('rpc'))        return '📋';
+  return '📌';
+}
+
+// ── HELPER FUNCTIONS ─────────────────────────────────────────────
+
+/**
+ * Returns all incidents matching the given year and crimeType filter.
  * @param {number|'all'} year
- * @param {string}       crimeType  'total'|'index'|'nonIndex'|specific type key
+ * @param {string} crimeType  'total' | specific key
  */
 function getIncidents(year, crimeType) {
-  const INDEX_TYPES    = ['murder','homicide','physicalInjury','rape','robbery','theft','carnapping'];
-  const NONINDEX_TYPES = ['nonIndex'];
-
   return ALL_INCIDENTS.filter(inc => {
     const yearOk = (year === 'all' || inc.year === parseInt(year, 10));
-    let typeOk = true;
-    if (crimeType === 'index')    typeOk = INDEX_TYPES.includes(inc.crimeType);
-    if (crimeType === 'nonIndex') typeOk = NONINDEX_TYPES.includes(inc.crimeType);
-    if (crimeType !== 'total' && crimeType !== 'index' && crimeType !== 'nonIndex') {
-      typeOk = inc.crimeType === crimeType;
-    }
+    const typeOk = (!crimeType || crimeType === 'total') ? true
+      : inc.crimeType === crimeType;
     return yearOk && typeOk;
   });
 }
 
 /**
  * Returns incidents for a specific municipality.
- * @param {string}       municipalityId
- * @param {number|'all'} year
- * @param {string}       crimeType
  */
 function getMunicipalityIncidents(municipalityId, year, crimeType) {
-  return getIncidents(year, crimeType).filter(inc => inc.municipalityId === municipalityId);
+  return getIncidents(year, crimeType)
+    .filter(inc => inc.municipalityId === municipalityId);
 }
 
 /**
  * Returns Leaflet.heat compatible array: [[lat, lng, intensity], ...]
- * Intensity is normalised 0–1 based on max incidents per municipality.
  */
 function getHeatPoints(year, crimeType) {
-  const filtered = getIncidents(year, crimeType);
-  // Each incident contributes one heat point; weight by crime severity
-  const SEVERITY = {
-    murder: 1.0, homicide: 0.95, rape: 0.9, robbery: 0.8,
-    physicalInjury: 0.7, carnapping: 0.6, theft: 0.5, nonIndex: 0.3,
-  };
-  return filtered.map(inc => [
-    inc.lat,
-    inc.lng,
-    SEVERITY[inc.crimeType] || 0.4,
-  ]);
+  return getIncidents(year, crimeType).map(inc => [inc.lat, inc.lng, 0.7]);
+}
+
+/**
+ * Returns sorted list of unique crime type keys present in ALL_INCIDENTS.
+ */
+function getActiveCrimeTypes() {
+  const counts = {};
+  ALL_INCIDENTS.forEach(i => {
+    counts[i.crimeType] = (counts[i.crimeType] || 0) + 1;
+  });
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, count]) => ({ key, count, ...CRIME_TYPE_META[key] }));
+}
+
+/**
+ * Returns unique years present in ALL_INCIDENTS.
+ */
+function getActiveYears() {
+  return [...new Set(ALL_INCIDENTS.map(i => i.year))].sort();
+}
+
+/**
+ * Returns unique barangay names for a municipality from uploaded data.
+ */
+function getUploadedBarangays(municipalityId) {
+  return [...new Set(
+    ALL_INCIDENTS
+      .filter(i => i.municipalityId === municipalityId)
+      .map(i => i.barangay)
+  )].sort();
 }

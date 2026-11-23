@@ -220,20 +220,20 @@
         </h3>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="stat-value" id="stat-total">2,774</div>
-            <div class="stat-label">Total Crimes<br>(2021–2023)</div>
+            <div class="stat-value" id="stat-total">—</div>
+            <div class="stat-label">Total Incidents<br>(Uploaded)</div>
           </div>
           <div class="stat-card">
-            <div class="stat-value" id="stat-index">485</div>
-            <div class="stat-label">Index Crimes<br>(2021–2023)</div>
+            <div class="stat-value" id="stat-index">—</div>
+            <div class="stat-label" data-stat="index-label">Crime<br>Types</div>
           </div>
           <div class="stat-card">
-            <div class="stat-value highlight-red" id="stat-hotspot">San Jose</div>
+            <div class="stat-value highlight-red" id="stat-hotspot">—</div>
             <div class="stat-label">Top Crime<br>Municipality</div>
           </div>
           <div class="stat-card">
-            <div class="stat-value" id="stat-cse">72.98%</div>
-            <div class="stat-label">CSE 2023<br>(Province)</div>
+            <div class="stat-value" id="stat-cse">—</div>
+            <div class="stat-label" data-stat="cse-label">Year<br>Range</div>
           </div>
         </div>
       </section>
@@ -246,6 +246,58 @@
         <ol class="ranking-list" id="ranking-list">
           <!-- populated by JS -->
         </ol>
+      </section>
+
+      <!-- DATA UPLOAD -->
+      <section class="sidebar-section">
+        <h3 class="section-title">
+          <span class="section-icon">📂</span> Upload Crime Data
+        </h3>
+
+        <!-- Drop zone -->
+        <div class="upload-dropzone" id="upload-dropzone">
+          <div class="upload-drop-icon">⬆</div>
+          <div class="upload-drop-text">Drop CSV / JSON here<br>or click to browse</div>
+          <input type="file" id="upload-file-input" accept=".csv,.json" style="display:none">
+        </div>
+
+        <!-- Template download -->
+        <button id="btn-download-template" class="btn-secondary" style="margin-top:6px">
+          ⬇ Download CSV Template
+        </button>
+
+        <!-- Parse result / column mapper (hidden until file loaded) -->
+        <div id="upload-mapper" class="upload-mapper hidden">
+          <div class="upload-file-info" id="upload-file-info"></div>
+
+          <div class="upload-mapper-title">Column Mapping</div>
+          <div class="upload-col-grid" id="upload-col-grid">
+            <!-- populated by JS -->
+          </div>
+
+          <!-- Validation summary -->
+          <div class="upload-validation" id="upload-validation"></div>
+
+          <!-- Data preview table -->
+          <div class="upload-preview-wrap">
+            <div class="upload-preview-title">Preview (first 5 rows)</div>
+            <div class="upload-preview-scroll">
+              <table class="upload-preview-table" id="upload-preview-table"></table>
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="upload-actions">
+            <button id="btn-import" class="btn-import">✔ Import Records</button>
+            <button id="btn-upload-cancel" class="btn-secondary">✕ Cancel</button>
+          </div>
+        </div>
+
+        <!-- Imported summary (shown after import) -->
+        <div id="upload-imported-summary" class="upload-imported-summary hidden"></div>
+        <button id="btn-clear-uploaded" class="btn-secondary btn-danger hidden" style="margin-top:6px">
+          🗑 Remove Uploaded Data
+        </button>
       </section>
 
       <div class="sidebar-footer">
@@ -261,6 +313,19 @@
       <!-- Map container -->
       <div class="map-wrapper">
         <div id="map"></div>
+
+        <!-- Empty state overlay — shown when no data is loaded -->
+        <div id="map-empty-state" class="map-empty-state">
+          <div class="map-empty-icon">🗺</div>
+          <div class="map-empty-title">No Crime Data Loaded</div>
+          <div class="map-empty-body">
+            Upload a CSV or JSON file from the sidebar to begin.<br>
+            The heatmap, charts, and XAI predictions will populate automatically.
+          </div>
+          <div class="map-empty-hint">
+            ⬇ <strong>Download CSV Template</strong> from the Upload panel to see the required format.
+          </div>
+        </div>
 
         <!-- Floating info panel (shown on municipality click) -->
         <div id="info-panel" class="info-panel hidden">
@@ -314,20 +379,35 @@
         <!-- Crime type dot legend (bottom-left, visible when dots are shown) -->
         <div class="crime-type-legend" id="crime-type-legend">
           <div class="crime-type-legend-title">Incident Dot Legend</div>
-          <div class="crime-type-legend-items">
-            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#f39c12"></div>Theft</div>
-            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#e74c3c"></div>Rape</div>
-            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#e67e22"></div>Physical Injury</div>
-            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#c0392b"></div>Robbery</div>
-            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#8e1c1c"></div>Murder</div>
-            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#922b21"></div>Homicide</div>
-            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#2980b9"></div>Carnapping</div>
-            <div class="crime-legend-item"><div class="crime-legend-dot" style="background:#7f8c8d"></div>Non-Index</div>
+          <div class="crime-type-legend-items" id="crime-type-legend-items">
+            <!-- populated dynamically by app.js after import -->
+            <div class="crime-legend-item" style="color:#4d5b6e">Upload data to populate</div>
           </div>
         </div>
 
         <!-- Bottom hint when dots are active -->
         <div class="dot-hint" id="dot-hint">Click a dot to see incident details · Click map to clear</div>
+
+        <!-- ═══ BARANGAY PICKER OVERLAY ═══ -->
+        <div id="brgy-picker" class="brgy-picker hidden">
+          <div class="brgy-picker-header">
+            <div class="brgy-picker-title">
+              <span>🏘</span>
+              <span id="brgy-picker-muni-name">Select Barangay</span>
+            </div>
+            <div class="brgy-picker-actions">
+              <button id="brgy-picker-showall" class="brgy-picker-btn-all" title="Show all barangays">
+                Show All
+              </button>
+              <button id="brgy-picker-close" class="brgy-picker-close" title="Close">✕</button>
+            </div>
+          </div>
+          <input id="brgy-picker-search" class="brgy-picker-search"
+                 type="text" placeholder="Search barangay…" autocomplete="off">
+          <div class="brgy-picker-list" id="brgy-picker-list">
+            <!-- populated by JS -->
+          </div>
+        </div>
 
         <!-- ═══ XAI PREDICTION PANEL (right drawer) ═══ -->
         <div id="xai-panel" class="xai-panel hidden">
@@ -435,8 +515,8 @@
       <div class="chart-panel">
         <div class="chart-tabs">
           <button class="chart-tab active" data-chart="bar">📊 Municipality Comparison</button>
-          <button class="chart-tab" data-chart="trend">📈 Provincial Trend</button>
-          <button class="chart-tab" data-chart="focus">🔍 Focus Crimes (H1 2024)</button>
+          <button class="chart-tab" data-chart="trend">📈 Year-over-Year Trend</button>
+          <button class="chart-tab" data-chart="focus">🔍 Crime Types Breakdown</button>
         </div>
 
         <div class="chart-view active" id="chart-view-bar">
@@ -463,6 +543,7 @@
   <script src="js/data.js"></script>
   <script src="js/incidents.js"></script>
   <script src="js/xai.js"></script>
+  <script src="js/upload.js"></script>
   <script src="js/map.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/app.js"></script>
