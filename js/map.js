@@ -130,7 +130,6 @@ const MapModule = (() => {
 
   // ── BARANGAY DOT LAYER ────────────────────────────────────────
   function showBarangayDots(municipalityId, barangayName) {
-    _activeMuniId = municipalityId;
     _clearDots();
 
     const incidents = ALL_INCIDENTS.filter(i => {
@@ -294,6 +293,7 @@ const MapModule = (() => {
   }
 
   return { init, update, highlightById, getRiskTier,
-           showBarangayDots, clearDots: _clearDots };
+           showBarangayDots, clearDots: _clearDots,
+           invalidateSize: () => _map && _map.invalidateSize() };
 
 })();

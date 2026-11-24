@@ -25,6 +25,7 @@
     _bindXaiPanel();
     _bindBrgyPicker();
     _bindUploadPanel();
+    _bindPanelToggles();
     _updateOverlayTitle();
     _updateSummaryStats();
     _renderRankingList();
@@ -486,9 +487,10 @@
 
     document.getElementById('brgy-picker-showall').addEventListener('click', () => {
       if (_pickerMuniData) {
+        const muniData  = _pickerMuniData;   // capture before close nulls it
+        const barangays = getUploadedBarangays(muniData.id);
         _closeBrgyPicker();
-        const barangays = getUploadedBarangays(_pickerMuniData.id);
-        barangays.forEach(b => MapModule.showBarangayDots(_pickerMuniData.id, b));
+        barangays.forEach(b => MapModule.showBarangayDots(muniData.id, b));
         document.getElementById('dot-hint').classList.add('visible');
       }
     });
@@ -735,6 +737,57 @@
     document.body.appendChild(toast);
     setTimeout(() => toast.classList.add('visible'), 10);
     setTimeout(() => { toast.classList.remove('visible'); setTimeout(() => toast.remove(), 400); }, 3500);
+  }
+
+  // ── PANEL TOGGLES ─────────────────────────────────────────────
+  function _bindPanelToggles() {
+    // Legend collapse
+    const legendToggle = document.getElementById('legend-toggle');
+    const legendEl     = document.getElementById('crime-type-legend');
+    if (legendToggle && legendEl) {
+      legendToggle.addEventListener('click', () => {
+        const collapsed = legendEl.classList.toggle('collapsed');
+        legendToggle.textContent = collapsed ? '+' : '−';
+        legendToggle.title       = collapsed ? 'Expand legend' : 'Collapse legend';
+      });
+    }
+
+    // Left sidebar toggle
+    const btnSidebar  = document.getElementById('toggle-sidebar');
+    const appLayout   = document.querySelector('.app-layout');
+    if (btnSidebar && appLayout) {
+      btnSidebar.addEventListener('click', () => {
+        const hidden = appLayout.classList.toggle('sidebar-hidden');
+        btnSidebar.textContent = hidden ? '▶' : '◀';
+        btnSidebar.title       = hidden ? 'Show sidebar' : 'Hide sidebar';
+        // reposition button: when sidebar is gone it needs to stay at the left map edge
+        btnSidebar.style.left  = hidden ? '4px' : '4px';
+        setTimeout(() => MapModule.invalidateSize && MapModule.invalidateSize(), 300);
+      });
+    }
+
+    // Top navbar toggle
+    const btnTopbar = document.getElementById('toggle-topbar');
+    if (btnTopbar) {
+      btnTopbar.addEventListener('click', () => {
+        const hidden = document.body.classList.toggle('topbar-hidden');
+        btnTopbar.textContent = hidden ? '▼' : '▲';
+        btnTopbar.title       = hidden ? 'Show top bar' : 'Hide top bar';
+        setTimeout(() => MapModule.invalidateSize && MapModule.invalidateSize(), 300);
+      });
+    }
+
+    // Bottom chart panel toggle
+    const btnChart   = document.getElementById('toggle-chart');
+    const mainContent = document.querySelector('.main-content');
+    if (btnChart && mainContent) {
+      btnChart.addEventListener('click', () => {
+        const hidden = mainContent.classList.toggle('chart-hidden');
+        btnChart.textContent = hidden ? '▲' : '▼';
+        btnChart.title       = hidden ? 'Show charts' : 'Hide charts';
+        setTimeout(() => MapModule.invalidateSize && MapModule.invalidateSize(), 300);
+      });
+    }
   }
 
 })();

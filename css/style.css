@@ -1447,3 +1447,79 @@ html, body {
   border-radius: 20px;
   padding: 6px 16px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   PANEL TOGGLE BUTTONS  (float on map edges)
+═══════════════════════════════════════════════════════════════════ */
+
+.panel-toggle {
+  position: absolute;
+  z-index: 600;
+  background: rgba(22, 27, 34, 0.90);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color .15s, background .15s, border-color .15s;
+  font-family: var(--font-sans);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.panel-toggle:hover {
+  color: var(--accent-blue-lt);
+  border-color: var(--accent-blue);
+  background: rgba(58, 123, 213, 0.12);
+}
+
+/* Left sidebar toggle — sits at left edge, vertically centred */
+.panel-toggle-left {
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 44px;
+  writing-mode: horizontal-tb;
+}
+
+/* Top navbar toggle — sits at top edge, horizontally centred */
+.panel-toggle-top {
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 18px;
+}
+
+/* Bottom chart toggle — sits at bottom edge, horizontally centred */
+.panel-toggle-bottom {
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 18px;
+}
+
+/* ── Hidden panel states ───────────────────────────────────────── */
+
+/* Sidebar hidden */
+.app-layout.sidebar-hidden .sidebar {
+  display: none;
+}
+
+/* Topbar hidden — shift layout up */
+body.topbar-hidden .topbar {
+  display: none;
+}
+body.topbar-hidden .app-layout {
+  top: 0;
+}
+
+/* Chart panel hidden */
+.main-content.chart-hidden .chart-panel {
+  display: none;
+}

@@ -83,7 +83,28 @@
       color: #4d5b6e;
       margin-bottom: 6px;
       font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
     }
+    .legend-toggle-btn {
+      background: transparent;
+      border: 1px solid #2a3447;
+      color: #4d5b6e;
+      border-radius: 4px;
+      font-size: 11px;
+      line-height: 1;
+      padding: 0 4px;
+      cursor: pointer;
+      pointer-events: all;
+      transition: color .15s, border-color .15s;
+      flex-shrink: 0;
+    }
+    .legend-toggle-btn:hover { color: #8b949e; border-color: #8b949e; }
+    /* collapsed state hides the items grid */
+    .crime-type-legend.collapsed .crime-type-legend-items { display: none; }
+    .crime-type-legend.collapsed { padding-bottom: 6px; }
     .crime-type-legend-items {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -378,7 +399,10 @@
 
         <!-- Crime type dot legend (bottom-left, visible when dots are shown) -->
         <div class="crime-type-legend" id="crime-type-legend">
-          <div class="crime-type-legend-title">Incident Dot Legend</div>
+          <div class="crime-type-legend-title">
+            Incident Dot Legend
+            <button id="legend-toggle" class="legend-toggle-btn" title="Collapse legend">−</button>
+          </div>
           <div class="crime-type-legend-items" id="crime-type-legend-items">
             <!-- populated dynamically by app.js after import -->
             <div class="crime-legend-item" style="color:#4d5b6e">Upload data to populate</div>
@@ -387,6 +411,14 @@
 
         <!-- Bottom hint when dots are active -->
         <div class="dot-hint" id="dot-hint">Click a dot to see incident details · Click map to clear</div>
+
+        <!-- ═══ PANEL TOGGLE BUTTONS ═══ -->
+        <!-- Toggle left sidebar -->
+        <button id="toggle-sidebar" class="panel-toggle panel-toggle-left" title="Hide/show sidebar">◀</button>
+        <!-- Toggle top navbar -->
+        <button id="toggle-topbar" class="panel-toggle panel-toggle-top" title="Hide/show top bar">▲</button>
+        <!-- Toggle bottom chart panel -->
+        <button id="toggle-chart" class="panel-toggle panel-toggle-bottom" title="Hide/show charts">▼</button>
 
         <!-- ═══ BARANGAY PICKER OVERLAY ═══ -->
         <div id="brgy-picker" class="brgy-picker hidden">
